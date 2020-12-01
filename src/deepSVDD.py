@@ -32,8 +32,8 @@ class DeepSVDD(object):
         self.objective = objective
         assert (0 < nu) & (nu <= 1), "For hyperparameter nu, it must hold: 0 < nu <= 1."
         self.nu = nu
-        self.R = 0.0  # hypersphere radius R
-        self.c = None  # hypersphere center c
+        self.R = 1.0  # hypersphere radius R
+        self.c = 0  # hypersphere center c
 
         self.net_name = None
         self.net = None  # neural network \phi
@@ -61,7 +61,9 @@ class DeepSVDD(object):
               lr_milestones: tuple = (), batch_size: int = 128, weight_decay: float = 1e-6, device: str = 'cuda',
               n_jobs_dataloader: int = 0):
         """Trains the Deep SVDD model on the training data."""
+        print("train 진입")
 
+        device = 'cuda'
         self.optimizer_name = optimizer_name
         self.trainer = DeepSVDDTrainer(self.objective, self.R, self.c, self.nu, optimizer_name, lr=lr,
                                        n_epochs=n_epochs, lr_milestones=lr_milestones, batch_size=batch_size,
@@ -69,11 +71,19 @@ class DeepSVDD(object):
         # Get the model
         self.net = self.trainer.train(dataset, self.net)
         self.R = float(self.trainer.R.cpu().data.numpy())  # get float
+        print("-----------------self.R----------------")
+        print(self.R)
+        print("----------------- self.c----------------")
         self.c = self.trainer.c.cpu().data.numpy().tolist()  # get list
+        print(self.c)
+
         self.results['train_time'] = self.trainer.train_time
 
     def test(self, dataset: BaseADDataset, device: str = 'cuda', n_jobs_dataloader: int = 0):
         """Tests the Deep SVDD model on the test data."""
+        print("test 진입")
+
+        device = 'cuda'
 
         if self.trainer is None:
             self.trainer = DeepSVDDTrainer(self.objective, self.R, self.c, self.nu,
@@ -92,11 +102,15 @@ class DeepSVDD(object):
 
         self.ae_net = build_autoencoder(self.net_name)
         self.ae_optimizer_name = optimizer_name
-        self.ae_trainer = AETrainer(optimizer_name, lr=lr, n_epochs=n_epochs, lr_milestones=lr_milestones,
+        self.ae_trainer = AETrainer(optimizer_name, lr=lr, c = self.c, n_epochs=n_epochs, lr_milestones=lr_milestones,
                                     batch_size=batch_size, weight_decay=weight_decay, device=device,
                                     n_jobs_dataloader=n_jobs_dataloader)
         self.ae_net = self.ae_trainer.train(dataset, self.ae_net)
+        #print(self.ae_net) #MNIST_Dataset
+
+        #print(dataset) #
         self.ae_trainer.test(dataset, self.ae_net)
+        print("init_network_weights_from_pretraining 진입")
         self.init_network_weights_from_pretraining()
 
     def init_network_weights_from_pretraining(self):

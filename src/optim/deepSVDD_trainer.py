@@ -2,14 +2,14 @@ from base.base_trainer import BaseTrainer
 from base.base_dataset import BaseADDataset
 from base.base_net import BaseNet
 from torch.utils.data.dataloader import DataLoader
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, accuracy_score
 
 import logging
 import time
 import torch
 import torch.optim as optim
 import numpy as np
-
+import tensorflow as tf
 
 class DeepSVDDTrainer(BaseTrainer):
 
@@ -21,7 +21,7 @@ class DeepSVDDTrainer(BaseTrainer):
 
         assert objective in ('one-class', 'soft-boundary'), "Objective must be either 'one-class' or 'soft-boundary'."
         self.objective = objective
-
+        self.device = 'cuda'
         # Deep SVDD parameters
         self.R = torch.tensor(R, device=self.device)  # radius R initialized with 0 by default.
         self.c = torch.tensor(c, device=self.device) if c is not None else None
@@ -35,6 +35,7 @@ class DeepSVDDTrainer(BaseTrainer):
         self.test_auc = None
         self.test_time = None
         self.test_scores = None
+
 
     def train(self, dataset: BaseADDataset, net: BaseNet):
         logger = logging.getLogger()
@@ -64,7 +65,6 @@ class DeepSVDDTrainer(BaseTrainer):
         net.train()
         for epoch in range(self.n_epochs):
 
-            scheduler.step()
             if epoch in self.lr_milestones:
                 logger.info('  LR scheduler: new learning rate is %g' % float(scheduler.get_lr()[0]))
 
@@ -72,9 +72,8 @@ class DeepSVDDTrainer(BaseTrainer):
             n_batches = 0
             epoch_start_time = time.time()
             for data in train_loader:
-                inputs, _, _ = data
+                inputs, label, _ = data
                 inputs = inputs.to(self.device)
-
                 # Zero the network parameter gradients
                 optimizer.zero_grad()
 
@@ -84,10 +83,11 @@ class DeepSVDDTrainer(BaseTrainer):
                 if self.objective == 'soft-boundary':
                     scores = dist - self.R ** 2
                     loss = self.R ** 2 + (1 / self.nu) * torch.mean(torch.max(torch.zeros_like(scores), scores))
-                else:
+                else: #one-class
                     loss = torch.mean(dist)
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
 
                 # Update hypersphere radius R on mini-batch distances
                 if (self.objective == 'soft-boundary') and (epoch >= self.warm_up_n_epochs):
@@ -113,26 +113,29 @@ class DeepSVDDTrainer(BaseTrainer):
 
         # Set device for network
         net = net.to(self.device)
-
+        list_output=[]
         # Get test data loader
         _, test_loader = dataset.loaders(batch_size=self.batch_size, num_workers=self.n_jobs_dataloader)
-
+        print('num of test_loader : {}'.format(len(test_loader)))
         # Testing
         logger.info('Starting testing...')
         start_time = time.time()
         idx_label_score = []
         net.eval()
+        print('deepSVDD test()---------------')
         with torch.no_grad():
             for data in test_loader:
                 inputs, labels, idx = data
                 inputs = inputs.to(self.device)
                 outputs = net(inputs)
                 dist = torch.sum((outputs - self.c) ** 2, dim=1)
+                print(dist)
+                print(labels)
+                dist_= dist.cpu().numpy().tolist()
                 if self.objective == 'soft-boundary':
                     scores = dist - self.R ** 2
                 else:
                     scores = dist
-
                 # Save triples of (idx, label, score) in a list
                 idx_label_score += list(zip(idx.cpu().data.numpy().tolist(),
                                             labels.cpu().data.numpy().tolist(),
@@ -140,18 +143,18 @@ class DeepSVDDTrainer(BaseTrainer):
 
         self.test_time = time.time() - start_time
         logger.info('Testing time: %.3f' % self.test_time)
-
         self.test_scores = idx_label_score
 
         # Compute AUC
         _, labels, scores = zip(*idx_label_score)
         labels = np.array(labels)
         scores = np.array(scores)
-
-        self.test_auc = roc_auc_score(labels, scores)
+        # self.test_auc = roc_auc_score(labels, scores)
+        test_acc = accuracy_score(labels, list_output)
         logger.info('Test set AUC: {:.2f}%'.format(100. * self.test_auc))
-
+        #logger.info('Test set AUCCURAY : {:.2f}%'.format(100. * test_acc))
         logger.info('Finished testing.')
+        return str(test_acc)
 
     def init_center_c(self, train_loader: DataLoader, net: BaseNet, eps=0.1):
         """Initialize hypersphere center c as the mean from an initial forward pass on the data."""

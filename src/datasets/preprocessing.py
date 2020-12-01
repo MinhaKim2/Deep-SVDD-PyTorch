@@ -28,10 +28,11 @@ def global_contrast_normalization(x: torch.tensor, scale='l2'):
 
     if scale == 'l1':
         x_scale = torch.mean(torch.abs(x))
+      #  print(x_scale)
 
     if scale == 'l2':
         x_scale = torch.sqrt(torch.sum(x ** 2)) / n_features
 
     x /= x_scale
-
+   # print('x : {}'.format(x))
     return x

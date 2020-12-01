@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import click
 import torch
 import logging
@@ -8,7 +9,7 @@ from utils.config import Config
 from utils.visualization.plot_images_grid import plot_images_grid
 from deepSVDD import DeepSVDD
 from datasets.main import load_dataset
-
+from datasets.mnist import MNIST_Dataset
 
 ################################################################################
 # Settings
@@ -89,7 +90,7 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
     logger.info('Network: %s' % net_name)
 
     # If specified, load experiment config from JSON-file
-    if load_config:
+    if load_config: #None
         cfg.load_config(import_json=load_config)
         logger.info('Loaded configuration from %s.' % load_config)
 
@@ -112,7 +113,6 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
 
     # Load data
     dataset = load_dataset(dataset_name, data_path, normal_class)
-
     # Initialize DeepSVDD model and set neural network \phi
     deep_SVDD = DeepSVDD(cfg.settings['objective'], cfg.settings['nu'])
     deep_SVDD.set_network(net_name)
@@ -122,7 +122,7 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
         logger.info('Loading model from %s.' % load_model)
 
     logger.info('Pretraining: %s' % pretrain)
-    if pretrain:
+    if pretrain: #default true
         # Log pretraining details
         logger.info('Pretraining optimizer: %s' % cfg.settings['ae_optimizer_name'])
         logger.info('Pretraining learning rate: %g' % cfg.settings['ae_lr'])
@@ -130,8 +130,10 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
         logger.info('Pretraining learning rate scheduler milestones: %s' % (cfg.settings['ae_lr_milestone'],))
         logger.info('Pretraining batch size: %d' % cfg.settings['ae_batch_size'])
         logger.info('Pretraining weight decay: %g' % cfg.settings['ae_weight_decay'])
+        #print('pretrain() 진입')
 
         # Pretrain model on dataset (via autoencoder)
+        #print(dataset)
         deep_SVDD.pretrain(dataset,
                            optimizer_name=cfg.settings['ae_optimizer_name'],
                            lr=cfg.settings['ae_lr'],
@@ -149,7 +151,6 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
     logger.info('Training learning rate scheduler milestones: %s' % (cfg.settings['lr_milestone'],))
     logger.info('Training batch size: %d' % cfg.settings['batch_size'])
     logger.info('Training weight decay: %g' % cfg.settings['weight_decay'])
-
     # Train model on dataset
     deep_SVDD.train(dataset,
                     optimizer_name=cfg.settings['optimizer_name'],
@@ -162,31 +163,40 @@ def main(dataset_name, net_name, xp_path, data_path, load_config, load_model, ob
                     n_jobs_dataloader=n_jobs_dataloader)
 
     # Test model
-    deep_SVDD.test(dataset, device=device, n_jobs_dataloader=n_jobs_dataloader)
+    title_auc = deep_SVDD.test(dataset, device=device, n_jobs_dataloader=n_jobs_dataloader)
 
     # Plot most anomalous and most normal (within-class) test samples
     indices, labels, scores = zip(*deep_SVDD.results['test_scores'])
     indices, labels, scores = np.array(indices), np.array(labels), np.array(scores)
     idx_sorted = indices[labels == 0][np.argsort(scores[labels == 0])]  # sorted from lowest to highest anomaly score
-
-    if dataset_name in ('mnist', 'cifar10'):
-
-        if dataset_name == 'mnist':
-            X_normals = dataset.test_set.test_data[idx_sorted[:32], ...].unsqueeze(1)
-            X_outliers = dataset.test_set.test_data[idx_sorted[-32:], ...].unsqueeze(1)
-
-        if dataset_name == 'cifar10':
-            X_normals = torch.tensor(np.transpose(dataset.test_set.test_data[idx_sorted[:32], ...], (0, 3, 1, 2)))
-            X_outliers = torch.tensor(np.transpose(dataset.test_set.test_data[idx_sorted[-32:], ...], (0, 3, 1, 2)))
-
-        plot_images_grid(X_normals, export_img=xp_path + '/normals', title='Most normal examples', padding=2)
-        plot_images_grid(X_outliers, export_img=xp_path + '/outliers', title='Most anomalous examples', padding=2)
+    #
+    # if dataset_name in ('mnist', 'cifar10'):
+    #
+    #     if dataset_name == 'mnist':
+    #         X_normals = dataset.test_set.test_data[idx_sorted[:32], ...].unsqueeze(1)
+    #         X_outliers = dataset.test_set.test_data[idx_sorted[-32:], ...].unsqueeze(1)
+    #
+    #     if dataset_name == 'cifar10':
+    #         X_normals = torch.tensor(np.transpose(dataset.test_set.test_data[idx_sorted[:32], ...], (0, 3, 1, 2)))
+    #         X_outliers = torch.tensor(np.transpose(dataset.test_set.test_data[idx_sorted[-32:], ...], (0, 3, 1, 2)))
+    #
+    #     plot_images_grid(X_normals, export_img=xp_path + '/normals', title='Most normal examples', padding=2)
+    #     plot_images_grid(X_outliers, export_img=xp_path + '/outliers', title='Most anomalous examples', padding=2)
 
     # Save results, model, and configuration
-    deep_SVDD.save_results(export_json=xp_path + '/results.json')
-    deep_SVDD.save_model(export_model=xp_path + '/model.tar')
-    cfg.save_config(export_json=xp_path + '/config.json')
+    deep_SVDD.save_results(export_json=xp_path + '/results_agc_'+str(title_auc)+'.json')
+    deep_SVDD.save_model(export_model=xp_path + '/model_agc_'+str(title_auc)+'.tar')
+    cfg.save_config(export_json=xp_path + '/config_'+str(title_auc)+'.json_')
 
 
 if __name__ == '__main__':
     main()
+#python main.py
+# mnist mnist_LeNet
+# ../log/mnist_test ../data --objective one-class
+# --lr 0.0001 --n_epochs 150 --lr_milestone 50
+# --batch_size 200 --weight_decay 0.5e-6
+# --pretrain True --ae_lr 0.0001
+# --ae_n_epochs 150 --ae_lr_milestone 50
+# --ae_batch_size 200 --ae_weight_decay 0.5e-3
+# --normal_class 3;

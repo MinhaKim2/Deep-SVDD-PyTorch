@@ -8,18 +8,18 @@ import time
 import torch
 import torch.optim as optim
 import numpy as np
-
+import tensorflow as tf
 
 class AETrainer(BaseTrainer):
 
-    def __init__(self, optimizer_name: str = 'adam', lr: float = 0.001, n_epochs: int = 150, lr_milestones: tuple = (),
+    def __init__(self, optimizer_name: str = 'adam', c = 0, lr: float = 0.001, n_epochs: int = 150, lr_milestones: tuple = (),
                  batch_size: int = 128, weight_decay: float = 1e-6, device: str = 'cuda', n_jobs_dataloader: int = 0):
         super().__init__(optimizer_name, lr, n_epochs, lr_milestones, batch_size, weight_decay, device,
                          n_jobs_dataloader)
-
+        self.c = c
     def train(self, dataset: BaseADDataset, ae_net: BaseNet):
         logger = logging.getLogger()
-
+        self.device = 'cuda'
         # Set device for network
         ae_net = ae_net.to(self.device)
 
@@ -39,7 +39,6 @@ class AETrainer(BaseTrainer):
         ae_net.train()
         for epoch in range(self.n_epochs):
 
-            scheduler.step()
             if epoch in self.lr_milestones:
                 logger.info('  LR scheduler: new learning rate is %g' % float(scheduler.get_lr()[0]))
 
@@ -47,7 +46,7 @@ class AETrainer(BaseTrainer):
             n_batches = 0
             epoch_start_time = time.time()
             for data in train_loader:
-                inputs, _, _ = data
+                inputs, l, _ = data
                 inputs = inputs.to(self.device)
 
                 # Zero the network parameter gradients
@@ -55,10 +54,17 @@ class AETrainer(BaseTrainer):
 
                 # Update network parameters via backpropagation: forward + backward + optimize
                 outputs = ae_net(inputs)
+                #print(inputs.size())
+               # print(outputs.size())
                 scores = torch.sum((outputs - inputs) ** 2, dim=tuple(range(1, outputs.dim())))
+
+               #mhkim test
+                #reconstruction_loss = tf.reduce_mean(tf.square(outputs.detach().cpu().numpy() - inputs.detach().cpu().numpy()))
+                #print('reconstruction_loss {}'.format(reconstruction_loss))
                 loss = torch.mean(scores)
                 loss.backward()
                 optimizer.step()
+                scheduler.step()
 
                 loss_epoch += loss.item()
                 n_batches += 1
@@ -97,7 +103,9 @@ class AETrainer(BaseTrainer):
                 outputs = ae_net(inputs)
                 scores = torch.sum((outputs - inputs) ** 2, dim=tuple(range(1, outputs.dim())))
                 loss = torch.mean(scores)
-
+                dist = torch.sum((outputs - self.c) ** 2, dim=1)
+                print(dist)
+                print(labels)
                 # Save triple of (idx, label, score) in a list
                 idx_label_score += list(zip(idx.cpu().data.numpy().tolist(),
                                             labels.cpu().data.numpy().tolist(),
